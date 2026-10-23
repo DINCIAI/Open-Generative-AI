@@ -28,19 +28,33 @@ export function appendGenerationRefundNotice(message, error) {
   return `${message} ${notice}`;
 }
 
+export function nextPollDelay(attempt, { initial = 2000, max = 30000, factor = 1.5 } = {}) {
+  return Math.min(max, Math.round(initial * factor ** (attempt - 1)));
+}
+
 export async function pollForGenerationResult({
   baseUrl,
   requestId,
   apiKey,
   maxAttempts = 900,
   interval = 2000,
+  maxInterval = 30000,
   onAuthRequired,
   fetchImpl = fetch,
+  waitImpl = wait,
 }) {
   const pollUrl = `${baseUrl}/api/v1/predictions/${requestId}/result`;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await wait(interval);
+  // Same total wait budget as a fixed-interval loop (maxAttempts × interval), but
+  // the gap between polls backs off exponentially from `interval` to `maxInterval`.
+  const budgetMs = maxAttempts * interval;
+  let waitedMs = 0;
+
+  for (let attempt = 1; waitedMs < budgetMs; attempt++) {
+    const delay = Math.min(nextPollDelay(attempt, { initial: interval, max: maxInterval }), budgetMs - waitedMs);
+    await waitImpl(delay);
+    waitedMs += delay;
+    const isLastAttempt = waitedMs >= budgetMs;
 
     let response;
     try {
@@ -48,7 +62,7 @@ export async function pollForGenerationResult({
         headers: { "Content-Type": "application/json", "x-api-key": apiKey },
       });
     } catch (error) {
-      if (attempt === maxAttempts) throw error;
+      if (isLastAttempt) throw error;
       continue;
     }
 
@@ -57,7 +71,7 @@ export async function pollForGenerationResult({
       const error = new Error(`Poll Failed: ${response.status} - ${detail.slice(0, 100)}`);
       error.requestId = requestId;
 
-      if (response.status >= 500 && attempt < maxAttempts) continue;
+      if (response.status >= 500 && !isLastAttempt) continue;
       onAuthRequired?.(response.status, detail);
       throw error;
     }
@@ -66,7 +80,7 @@ export async function pollForGenerationResult({
     try {
       result = await response.json();
     } catch (error) {
-      if (attempt === maxAttempts) throw error;
+      if (isLastAttempt) throw error;
       continue;
     }
 
