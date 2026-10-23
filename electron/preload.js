@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// MuAPI key lives in the main process (safeStorage). The renderer can only check,
+// replace or clear it — there is intentionally no way to read it back.
+contextBridge.exposeInMainWorld('muapiBridge', {
+    isElectron: true,
+    placeholderKey: 'electron-managed',
+    hasKey: () => ipcRenderer.invoke('muapi:key:has'),
+    setKey: (key) => ipcRenderer.invoke('muapi:key:set', key),
+    clearKey: () => ipcRenderer.invoke('muapi:key:clear'),
+});
+
 contextBridge.exposeInMainWorld('localAI', {
     isElectron: true,
 

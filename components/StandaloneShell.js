@@ -11,6 +11,7 @@ const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignA
 });
 import axios from 'axios';
 import ApiKeyModal from './ApiKeyModal';
+import { getMuapiBridge, loadElectronKey, saveElectronKey, clearElectronKey } from '@/lib/electronKey';
 import { getCommonCopy, getLocaleConfig, localizeStudioPath } from '@/lib/locales';
 
 // Tab/category ids, icons, and English `label` fallbacks are stable
@@ -575,6 +576,20 @@ export default function StandaloneShell({ locale = 'en' }) {
   }, [activeTab]);
 
   useEffect(() => {
+    // Electron: the key lives in the main process; we only get a placeholder.
+    const bridge = getMuapiBridge();
+    if (bridge) {
+      loadElectronKey(bridge, STORAGE_KEY)
+        .then((placeholder) => {
+          if (placeholder) {
+            setApiKey(placeholder);
+            fetchBalance(placeholder);
+          }
+        })
+        .catch((err) => console.error('Failed to load API key from Electron:', err))
+        .finally(() => setHasMounted(true));
+      return;
+    }
     setHasMounted(true);
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -586,6 +601,16 @@ export default function StandaloneShell({ locale = 'en' }) {
   }, [fetchBalance]);
 
   const handleKeySave = useCallback((key) => {
+    const bridge = getMuapiBridge();
+    if (bridge) {
+      saveElectronKey(bridge, key)
+        .then((placeholder) => {
+          setApiKey(placeholder);
+          fetchBalance(placeholder);
+        })
+        .catch((err) => window.alert(`API-Key konnte nicht gespeichert werden: ${err.message}`));
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, key);
     setApiKey(key);
     fetchBalance(key);
@@ -593,6 +618,10 @@ export default function StandaloneShell({ locale = 'en' }) {
   }, [fetchBalance]);
 
   const handleKeyChange = useCallback(() => {
+    const bridge = getMuapiBridge();
+    if (bridge) {
+      clearElectronKey(bridge).catch((err) => console.error('Failed to clear API key:', err));
+    }
     localStorage.removeItem(STORAGE_KEY);
     setApiKey(null);
     setBalance(null);
