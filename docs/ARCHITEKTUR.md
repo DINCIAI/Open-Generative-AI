@@ -77,3 +77,28 @@ Stand: Fork von `Anil-matcha/Open-Generative-AI` vom 23.10.2026, Branch `feature
 
 - Node-Testrunner (`node:test`, `node:assert/strict`), Dateien `tests/*.test.js`, CommonJS, testen `electron/lib/*`.
 - Upstream hat kein `npm test`-Skript → ergänzt in Phase 2.
+
+## 7. Soll-Zustand nach Phase 2 (Key im Main-Prozess)
+
+```
+Electron main
+├─ electron/lib/nextServer.js     startet `next dev|start --hostname 127.0.0.1 --port 37615` als Kindprozess
+├─ electron/lib/muapiKeyStore.js  Key verschlüsselt (safeStorage) in %APPDATA%\open-generative-ai\muapi-key.bin
+├─ electron/lib/muapiKeyInjector.js  webRequest.onBeforeSendHeaders: ersetzt `x-api-key`
+│                                  nur für http://127.0.0.1:<port>/api/* und https://api.muapi.ai/*
+└─ electron/lib/muapiBridge.js    IPC muapi:key:has|set|clear (kein get)
+Renderer (Next-App unter http://127.0.0.1:37615/studio)
+├─ electron/preload.js            window.muapiBridge { isElectron, placeholderKey, hasKey, setKey, clearKey }
+├─ lib/electronKey.js             Laden/Speichern/Löschen + einmalige Migration aus localStorage
+└─ components/StandaloneShell.js  nutzt im Electron-Modus den Platzhalter `electron-managed` als apiKey
+```
+
+- Start: `npm run electron:dev` (Next im Dev-Modus). `OGA_NEXT_MODE=start` nutzt einen vorhandenen `npm run build`. `OGA_LEGACY_UI=1` lädt die Alt-UI.
+- Fester Port 37615, weil localStorage (Verlauf, Entwürfe) pro Origin gespeichert wird. Ist er belegt, wird ein freier Port genommen (Warnung im Log; Verlauf dann nicht sichtbar).
+- Fenster bleibt auf dem lokalen Origin (`will-navigate`), externe Links öffnen im Browser.
+- Polling (`generationLifecycle.js`): Abstand wächst 2 s → 30 s (Faktor 1,5). Die Gesamtwartezeit bleibt bewusst wie upstream `maxAttempts × interval` (Video: 30 min) statt pauschal 15 min, damit bezahlte, lange Jobs nicht vorzeitig verworfen werden.
+- `npm run dev` bindet an 127.0.0.1; `npm start` bleibt unverändert, weil das Docker-Image darauf aufsetzt.
+
+### Bekannte Einschränkungen
+- **Agents-Seiten** (`app/agents/**`) lesen den Key serverseitig aus dem Cookie und rufen MuAPI vom Next-Server aus auf. Diese Aufrufe laufen nicht durch Chromium, bekommen also nur den Platzhalter → Agents funktionieren im Electron-Modus nicht. Für Genjutsu nicht nötig.
+- **Installer** (`electron:build:win`) enthält den Next-Server noch nicht und zeigt deshalb weiter die Alt-UI. Bündeln von `.next` + `node_modules` ist Teil von Phase 6.
